@@ -4,6 +4,15 @@ from flask import Flask, render_template, request, session, redirect, url_for
 import joblib
 import pandas as pd
 import numpy as np
+import google.generativeai as genai
+
+# Khởi tạo Gemini từ biến môi trường (không dùng Colab userdata)
+GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    GEMINI_MODEL = genai.GenerativeModel("gemini-2.0-flash")
+else:
+    GEMINI_MODEL = None
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'fallback_secret_key_here')
@@ -65,6 +74,43 @@ def page2():
     
     return render_template('page2.html')
 
+def generate_lifestyle_advice(features: dict, prediction_label: int) -> str:
+    risk_text = "Có khả năng mắc bệnh tim" if prediction_label == 1 else "Không có khả năng mắc bệnh tim"
+
+    fallback = (
+        f"Kết quả dự đoán: {risk_text}.\n"
+        "Gợi ý chung: ăn nhiều rau quả, hạn chế muối/đường, tập thể dục ≥150 phút/tuần, ngủ đủ, tránh thuốc lá, "
+        "và khám sức khỏe định kỳ.\n"
+        "Lưu ý: Đây không phải lời khuyên y khoa. Hãy gặp bác sĩ để được tư vấn cá nhân hóa."
+    )
+
+    if GEMINI_MODEL is None:
+        return fallback
+
+    sex = "Nam" if int(features.get("male", 0)) == 1 else "Nữ"
+    prompt = f"""
+Dựa trên dữ liệu:
+- Giới tính: {sex}
+- Tuổi: {features.get('age', 'NA')}
+- Hút thuốc: {'Có' if int(features.get('currentSmoker', 0)) == 1 else 'Không'}, {features.get('cigsPerDay', 'NA')} điếu/ngày
+- Cao huyết áp: {'Có' if int(features.get('prevalentHyp', 0)) == 1 else 'Không'}
+- Tiểu đường: {'Có' if int(features.get('diabetes', 0)) == 1 else 'Không'}
+- Cholesterol: {features.get('totChol', 'NA')} mg/dL
+- Huyết áp: {features.get('sysBP', 'NA')}/{features.get('diaBP', 'NA')} mmHg
+- BMI: {features.get('BMI', 'NA')}
+- Nhịp tim: {features.get('heartRate', 'NA')} bpm
+- Glucose: {features.get('glucose', 'NA')} mg/dL
+
+Kết quả mô hình: {risk_text}.
+Hãy đưa 4–6 gạch đầu dòng ngắn gọn về ăn uống, tập luyện, thói quen.
+Nhắc rằng đây KHÔNG phải lời khuyên y khoa. Trả lời bằng tiếng Việt.
+"""
+    try:
+        resp = GEMINI_MODEL.generate_content(prompt)
+        return getattr(resp, "text", None) or fallback
+    except Exception:
+        return fallback
+
 @app.route('/predict')
 def predict():
     try:
@@ -94,12 +140,13 @@ def predict():
         # Predict
         pred = model.predict(input_df)[0]
         proba = float(model.predict_proba(input_df)[0, 1])
-        
+        advice_text = generate_lifestyle_advice(input_data, int(pred))
         # Chuẩn bị kết quả
         result = {
             'prediction': 'high' if pred == 1 else 'low',
             'probability': proba,
-            'message': 'Thành công'
+            'message': 'Thành công',
+            'advice': advice_text
         }
         
         return render_template('result.html', result=result)
