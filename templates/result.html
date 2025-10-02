@@ -134,7 +134,12 @@
                     {% endif %}
                 </div>
             {% endif %}
-            
+            {% if result.advice %}
+                <div class="message" style="white-space: pre-line; margin-top: 12px;">
+                    <strong>Dưới đây là một số lời khuyên ngắn gọn:</strong><br>
+                    {{ result.advice }}
+                </div>
+            {% endif %}
             <a href="/" class="btn">Quay lại</a>
         </div>
     </div>
